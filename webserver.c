@@ -13,6 +13,8 @@
 #include <semaphore.h>
 #include <dirent.h>
 #include <signal.h>
+#include <wiringPi.h>
+#include <math.h>
 
 #define BUFFERSIZE 1024
 #define LINESIZE    80
@@ -22,6 +24,8 @@
 #define QLEN 10
 #define NUMBER_OF_THREADS 100
 #define min(x,y)   (int)((((int)x)<((int)y))?((int)x):((int)y))
+#define SENSOR 0 	// SENSOR PIN
+#define LUM_MIN 40000
 
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
@@ -31,29 +35,32 @@ char * get_filename_ext(const char *filename);
 int transferfile(char * path, int output_fd);
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
+void readSensor(int arg);
 
 
-int       myport;
-char      BASE[PATHSIZE];
-int 		  sd;                          // Socket descriptor
-int 		  status;                      // Estado da chamada
-struct 		sockaddr_in mylocal_addr;   // Meu endereço
-char 		  rxbuffer[1024];
-struct 		sockaddr_in fromaddr;
-int 		  size;
-int 		  newsd;
-struct    sockaddr_in clientaddr;
-char 		  stringIP[20];
-char 		  txbuffer[1024];
-char      req[20];
-char      ver[10];
-char      str[50];
-char      path[PATHSIZE];
-char      file[FILESIZE];
-sem_t     mutex;
-sem_t     file_write;
-pthread_t threads[100];
-int thread_count = 0;
+int			myport;
+char		BASE[PATHSIZE];
+int			sd;                          // Socket descriptor
+int			status;                      // Estado da chamada
+struct		sockaddr_in mylocal_addr;   // Meu endereço
+char		rxbuffer[1024];
+struct		sockaddr_in fromaddr;
+int			size;
+int			newsd;
+struct		sockaddr_in clientaddr;
+char		stringIP[20];
+char		txbuffer[1024];
+char		req[20];
+char		ver[10];
+char		str[50];
+char		path[PATHSIZE];
+char		file[FILESIZE];
+sem_t		mutex;
+sem_t		file_write;
+sem_t		sensor;
+pthread_t	threads[100];
+int			thread_count = 0;
+int 		LUMINOSIDADE = 0; 		// Variavel de luminosidade (sensor)
 
 void append(char *dest,int buffersize, char *src) {
   int d;
@@ -206,14 +213,16 @@ int transferfile(char * path, int output_fd) {
 }
 
 int main() {
-  FILE * config;
+	FILE * config;
 	int   status;
-  char * nBASE;
+	char * nBASE;
+	pthread_t sensor1;
 
 	sem_init(&mutex, 0, 1);
-  sem_init(&file_write, 0, 1);
+	sem_init(&file_write, 0, 1);
+	sem_init(&sensor, 0, 1);
 
-  signal(SIGPIPE,SIG_IGN);
+	signal(SIGPIPE,SIG_IGN);
 
 	//le arquivo de config.
 	config = fopen("config.txt", "r");
@@ -222,12 +231,17 @@ int main() {
 	printf("port = %d\r\n", myport);
 	fgets(BASE, PATHSIZE, config);
 
-  nBASE = strtok(BASE, "\r");
-  strcpy(BASE, nBASE);
+	nBASE = strtok(BASE, "\r");
+	strcpy(BASE, nBASE);
 
-  printf("PATH=%s\n", BASE);
+	printf("PATH=%s\n", BASE);
+	
+	// Disparar threads de sensor e LED
+	pthread_create(&sensor1, NULL, (void*) readSensor,1);
 
-  // Conexão
+	
+	
+	// Conexão
 	sd = socket(PF_INET, SOCK_STREAM, 0);
 	if (sd == -1) {
 		perror ("Erro na chamada socket");
@@ -240,8 +254,8 @@ int main() {
 	mylocal_addr.sin_port = htons(myport);
 
 	status = bind(sd,
-		(struct sockaddr *) &mylocal_addr,
-		sizeof(struct sockaddr_in));
+				(struct sockaddr *) &mylocal_addr,
+				sizeof(struct sockaddr_in));
 	if(status == -1) perror("Erro na chamada bind");
 
 	// Abrir a porta onde o servidor vai escutar
@@ -254,7 +268,8 @@ int main() {
 	// Aceitar uma nova conexão TCP
 	size = sizeof(clientaddr);
 
-	while(1) {
+	while(1) 
+	{
 		newsd = accept( sd,
 				(struct sockaddr *) &clientaddr,
 				(socklen_t *) &size);
@@ -264,11 +279,15 @@ int main() {
 		}
 
 		sem_wait(&mutex);
-    int * arg = malloc(sizeof(*arg));
-    *arg = newsd;
+		int * arg = malloc(sizeof(*arg));
+		*arg = newsd;
 		threads[thread_count] = pthread_create(&threads[thread_count], NULL, worker, arg);
 		thread_count++;
 		sem_post(&mutex);
+		
+		sem_wait(&sensor);
+		printf("nivel de luminosidade: %d\n", LUMINOSIDADE);
+		sem_post(&sensor);
 	}
 
 }
@@ -376,4 +395,49 @@ void gen_dirlist(char * html_response, char * path) {
   }
   strcat(html_response, "</body></html>");
   printf("HTML do diretorio: %s\r\n\r\n", html_response);
+}
+
+void readSensor(int arg)
+{
+	int count;
+	//printf("test0\n");
+	while (1)
+	{
+		//printf("test1\n");
+		count = 0;
+		wiringPiSetup () ;
+		pinMode(SENSOR,OUTPUT);
+		pullUpDnControl(SENSOR,PUD_OFF);
+		digitalWrite(SENSOR,0);
+		//printf("test2\n");
+		sleep(1);
+		
+		pinMode(SENSOR,INPUT);
+		
+		while(digitalRead(SENSOR) == 0)
+		{
+			//printf("%d",count);
+			count++;
+			//sleep(0.1);
+		}
+			
+		//printf("valor de count: %d\n", count);
+		
+		sem_wait(&sensor);
+		if (LUM_MIN - count > 0)
+		{
+			LUMINOSIDADE = (LUM_MIN-count)*100/LUM_MIN;
+		}
+		
+		else 
+			LUMINOSIDADE = 0;
+			
+		//printf("nivel de luminosidade: %d\n", LUMINOSIDADE);
+		sem_post(&sensor);
+		
+		usleep(500);
+		
+	}
+	
+	
 }
