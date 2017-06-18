@@ -13,8 +13,9 @@
 #include <semaphore.h>
 #include <dirent.h>
 #include <signal.h>
-#include <wiringPi.h>
+//#include <wiringPi.h>
 #include <math.h>
+#include <stdbool.h>
 
 #define BUFFERSIZE 1024
 #define LINESIZE    80
@@ -58,6 +59,7 @@ char		file[FILESIZE];
 sem_t		mutex;
 sem_t		file_write;
 sem_t		sensor;
+sem_t   persistentFiles;
 pthread_t	threads[100];
 int			thread_count = 0;
 int 		LUMINOSIDADE = 0; 		// Variavel de luminosidade (sensor)
@@ -130,7 +132,7 @@ int transferfile(char * path, int output_fd) {
 	strcpy(ext, get_filename_ext(basename(path)));
 
 	// Linha de status
-	if ((!strcmp(ext,"html") || !strcmp(ext,"jpg") || !strcmp(ext,"png"))==0) {
+	if ((!strcmp(ext,"html") || !strcmp(ext,"jpg") || !strcmp(ext,"png") || !strcmp(ext,"css") || !strcmp(ext,"js"))==0) {
 		strcpy(str, "HTTP/1.0 400 Bad Request\n");
 		write(output_fd, str, strlen(str));
 		return(-1);
@@ -190,6 +192,16 @@ int transferfile(char * path, int output_fd) {
 		printf("%s",str);
 	}
 
+  else if (!strcmp(ext, "css")) {
+		strcpy(str, "Content-Type: text/css\n\n");
+		printf("%s",str);
+	}
+
+  else if (!strcmp(ext, "js")) {
+		strcpy(str, "Content-Type: text/javascript\n\n");
+		printf("%s",str);
+	}
+
 
 	write(output_fd,str,strlen(str));
 
@@ -221,6 +233,7 @@ int main() {
 	sem_init(&mutex, 0, 1);
 	sem_init(&file_write, 0, 1);
 	sem_init(&sensor, 0, 1);
+  sem_init(&persistentFiles, 0, 1);
 
 	signal(SIGPIPE,SIG_IGN);
 
@@ -235,12 +248,12 @@ int main() {
 	strcpy(BASE, nBASE);
 
 	printf("PATH=%s\n", BASE);
-	
+
 	// Disparar threads de sensor e LED
 	pthread_create(&sensor1, NULL, (void*) readSensor,1);
 
-	
-	
+
+
 	// Conexão
 	sd = socket(PF_INET, SOCK_STREAM, 0);
 	if (sd == -1) {
@@ -268,7 +281,7 @@ int main() {
 	// Aceitar uma nova conexão TCP
 	size = sizeof(clientaddr);
 
-	while(1) 
+	while(1)
 	{
 		newsd = accept( sd,
 				(struct sockaddr *) &clientaddr,
@@ -284,12 +297,35 @@ int main() {
 		threads[thread_count] = pthread_create(&threads[thread_count], NULL, worker, arg);
 		thread_count++;
 		sem_post(&mutex);
-		
+
 		sem_wait(&sensor);
 		printf("nivel de luminosidade: %d\n", LUMINOSIDADE);
 		sem_post(&sensor);
 	}
 
+}
+
+void httpSetVar(char * path, int mode) {
+  FILE * persistentConfig;
+  char data[7];
+  sprintf(data, "%d\r\n", mode);
+  sem_wait(&persistentFiles);
+  persistentConfig = fopen(path, "w");
+  if (persistentConfig != NULL) {
+    fwrite(data, 1, sizeof(data), persistentConfig);
+    fclose(persistentConfig);
+    sem_post(&persistentFiles);
+    printf("%s set as %s\r\n", path, data);
+  } else {
+    printf("httpSetVar error.\r\n");
+  }
+}
+
+bool startsWith(const char *pre, const char *str)
+{
+    size_t lenpre = strlen(pre),
+           lenstr = strlen(str);
+    return lenstr < lenpre ? false : strncmp(pre, str, lenpre) == 0;
 }
 
 void * worker(void * arg) {
@@ -309,7 +345,7 @@ void * worker(void * arg) {
 		printf("Mensagem recebida:\r\n%s\r\n", rxbuffer);
 		sscanf(rxbuffer, "%s %s %s", req, path, ver);
 
-		printf("REQUEST: %s\r\nPATH: %s\r\n VER:%s\r\n", req, path, ver);
+		printf("REQUEST: %s\r\nPATH: %s\r\nVER:%s\r\n", req, path, ver);
 
     // Verificar req GET
 		if (strcmp(req,"GET")!=0) {
@@ -330,6 +366,49 @@ void * worker(void * arg) {
 			temp++;
 			continue;
 		}
+
+    if (strcmp(path, "/www/setMode?mode=0")==0) {
+      httpSetVar("www/MODO.txt", 0);
+      strcpy(str, "HTTP/1.0 204 No Content\r\n\r\n");
+			printf("%s",str);
+			write (wsd, str, strlen(str));
+      temp++;
+      continue;
+    } else if (strcmp(path, "/www/setMode?mode=1")==0) {
+      httpSetVar("www/MODO.txt", 1);
+      strcpy(str, "HTTP/1.0 204 No Content\r\n\r\n");
+			printf("%s",str);
+			write (wsd, str, strlen(str));
+      temp++;
+      continue;
+    } else if (strcmp(path, "/www/setState?state=0")==0) {
+      httpSetVar("www/ESTADO.txt", 0);
+      strcpy(str, "HTTP/1.0 204 No Content\r\n\r\n");
+			printf("%s",str);
+			write (wsd, str, strlen(str));
+      temp++;
+      continue;
+    } else if (strcmp(path, "/www/setState?state=1")==0) {
+      httpSetVar("www/ESTADO.txt", 1);
+      strcpy(str, "HTTP/1.0 204 No Content\r\n\r\n");
+			printf("%s",str);
+			write (wsd, str, strlen(str));
+      temp++;
+      continue;
+    } else if (startsWith("/www/setIntensity?intensity=", path)==true) {
+      char * pch = strtok (path,"=");
+      pch = strtok(NULL, "=");
+      int intensity = atoi(pch);
+      printf("Intensity sent = %s -> %d\r\n", pch, intensity);
+      if (intensity >= 0 && intensity <= 100) {
+        httpSetVar("www/INTENSIDADE.txt", intensity);
+        strcpy(str, "HTTP/1.0 204 No Content\r\n\r\n");
+  			printf("%s",str);
+  			write (wsd, str, strlen(str));
+        temp++;
+        continue;
+      }
+    }
 
 		strcpy(filename, BASE);
 		strcat(filename, path);
@@ -399,6 +478,7 @@ void gen_dirlist(char * html_response, char * path) {
 
 void readSensor(int arg)
 {
+  /*
 	int count;
 	//printf("test0\n");
 	while (1)
@@ -411,33 +491,34 @@ void readSensor(int arg)
 		digitalWrite(SENSOR,0);
 		//printf("test2\n");
 		sleep(1);
-		
+
 		pinMode(SENSOR,INPUT);
-		
+
 		while(digitalRead(SENSOR) == 0)
 		{
 			//printf("%d",count);
 			count++;
 			//sleep(0.1);
 		}
-			
+
 		//printf("valor de count: %d\n", count);
-		
+
 		sem_wait(&sensor);
 		if (LUM_MIN - count > 0)
 		{
 			LUMINOSIDADE = (LUM_MIN-count)*100/LUM_MIN;
 		}
-		
-		else 
+
+		else
 			LUMINOSIDADE = 0;
-			
+
 		//printf("nivel de luminosidade: %d\n", LUMINOSIDADE);
 		sem_post(&sensor);
-		
+
 		usleep(500);
-		
+
 	}
-	
-	
+  */
+
+
 }
