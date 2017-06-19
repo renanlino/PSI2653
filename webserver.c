@@ -13,7 +13,7 @@
 #include <semaphore.h>
 #include <dirent.h>
 #include <signal.h>
-//#include <wiringPi.h>
+#include <wiringPi.h>
 #include <math.h>
 #include <stdbool.h>
 
@@ -26,7 +26,7 @@
 #define NUMBER_OF_THREADS 100
 #define min(x,y)   (int)((((int)x)<((int)y))?((int)x):((int)y))
 #define SENSOR 0 	// SENSOR PIN
-#define LUM_MIN 40000
+#define NB_SAMPLES_SENSOR 6
 
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
@@ -37,6 +37,7 @@ int transferfile(char * path, int output_fd);
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
 void readSensor(int arg);
+
 
 
 int			myport;
@@ -59,10 +60,11 @@ char		file[FILESIZE];
 sem_t		mutex;
 sem_t		file_write;
 sem_t		sensor;
-sem_t   persistentFiles;
+sem_t   	persistentFiles;
 pthread_t	threads[100];
 int			thread_count = 0;
 int 		LUMINOSIDADE = 0; 		// Variavel de luminosidade (sensor)
+
 
 void append(char *dest,int buffersize, char *src) {
   int d;
@@ -478,8 +480,14 @@ void gen_dirlist(char * html_response, char * path) {
 
 void readSensor(int arg)
 {
-  /*
+	int lumMin = 0;
+	int lumMax = 500000;
 	int count;
+	int k = 0;
+	int i = 0;
+	int q = 0;
+	int mean = 0;
+	int countList[NB_SAMPLES_SENSOR] = {0};
 	//printf("test0\n");
 	while (1)
 	{
@@ -503,22 +511,64 @@ void readSensor(int arg)
 
 		//printf("valor de count: %d\n", count);
 
-		sem_wait(&sensor);
-		if (LUM_MIN - count > 0)
+		countList[k] = count;
+		k++;
+		
+			
+		
+		if (k == NB_SAMPLES_SENSOR)
 		{
-			LUMINOSIDADE = (LUM_MIN-count)*100/LUM_MIN;
+			i = 1;
+			k = 0;
 		}
+		//printf("k = %d e i = %d\n", k, i);
+		/*for (q=0; q < NB_SAMPLES_SENSOR; q++)
+		{
+			printf("countList[%d] : %d", q, countList[q]);
+		}
+		*/
+		
+		printf("lumMin = %d e lumMax = %d\n", lumMin, lumMax);
+		
+			
+		
+		if (i == 1)
+		{
+			mean = 0;
+			
+			for (q = 0; q < NB_SAMPLES_SENSOR; q++)
+			{
+				mean = mean + countList[q];
+			}
+				
+			mean = mean / NB_SAMPLES_SENSOR;
 
-		else
-			LUMINOSIDADE = 0;
 
-		//printf("nivel de luminosidade: %d\n", LUMINOSIDADE);
-		sem_post(&sensor);
+			if (mean < lumMax)
+				lumMax = count;
+				
+			if (mean > lumMin)
+				lumMin = count;
+				
+			sem_wait(&sensor);
+			if (lumMin-lumMax != 0)
+			{
+				LUMINOSIDADE = (lumMin-count)*100/(lumMin-lumMax);
+			}
+			
+			if (LUMINOSIDADE < 0)
+				LUMINOSIDADE = 0;
+			
+			else if (LUMINOSIDADE > 100)
+				LUMINOSIDADE = 100;
+
+			printf("nivel de luminosidade: %d\n\n", LUMINOSIDADE);
+			sem_post(&sensor);
+		}
 
 		usleep(500);
 
 	}
-  */
 
 
 }
