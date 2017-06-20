@@ -16,6 +16,7 @@
 #include <wiringPi.h>
 #include <math.h>
 #include <stdbool.h>
+#include <softPwmn.h>
 
 #define BUFFERSIZE 1024
 #define LINESIZE    80
@@ -26,7 +27,7 @@
 #define NUMBER_OF_THREADS 100
 #define min(x,y)   (int)((((int)x)<((int)y))?((int)x):((int)y))
 #define SENSOR 0 	// SENSOR PIN
-#define NB_SAMPLES_SENSOR 6
+#define LUM_MIN 40000
 
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
@@ -37,8 +38,7 @@ int transferfile(char * path, int output_fd);
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
 void readSensor(int arg);
-
-
+void pwm_led(int arg);
 
 int			myport;
 char		BASE[PATHSIZE];
@@ -60,11 +60,10 @@ char		file[FILESIZE];
 sem_t		mutex;
 sem_t		file_write;
 sem_t		sensor;
-sem_t   	persistentFiles;
+sem_t       persistentFiles;
 pthread_t	threads[100];
 int			thread_count = 0;
 int 		LUMINOSIDADE = 0; 		// Variavel de luminosidade (sensor)
-
 
 void append(char *dest,int buffersize, char *src) {
   int d;
@@ -231,13 +230,19 @@ int main() {
 	int   status;
 	char * nBASE;
 	pthread_t sensor1;
+    pthread_t led1;
 
 	sem_init(&mutex, 0, 1);
 	sem_init(&file_write, 0, 1);
 	sem_init(&sensor, 0, 1);
-  sem_init(&persistentFiles, 0, 1);
+    sem_init(&persistentFiles, 0, 1);
 
 	signal(SIGPIPE,SIG_IGN);
+    
+    httpSetVar("www/ESTADO.txt", 0);
+    httpSetVar("www/MODO.txt", 0);
+    httpSetVar("www/INTENSIDADE.txt", 0);
+    httpSetVar("www/LUMINOSIDADE.txt", 0);
 
 	//le arquivo de config.
 	config = fopen("config.txt", "r");
@@ -253,7 +258,7 @@ int main() {
 
 	// Disparar threads de sensor e LED
 	pthread_create(&sensor1, NULL, (void*) readSensor,1);
-
+    pthread_create(&led1, NULL, (void*) pwn_led,1);
 
 
 	// Conexão
@@ -296,8 +301,13 @@ int main() {
 		sem_wait(&mutex);
 		int * arg = malloc(sizeof(*arg));
 		*arg = newsd;
-		threads[thread_count] = pthread_create(&threads[thread_count], NULL, worker, arg);
-		thread_count++;
+		if (thread_count < NUMBER_OF_THREADS){
+			threads[thread_count] = pthread_create(&threads[thread_count], NULL, worker, arg);
+			thread_count++;
+		}
+		else {
+			printf("Numero maximo de clientes excedido");
+		}
 		sem_post(&mutex);
 
 		sem_wait(&sensor);
@@ -564,6 +574,7 @@ void readSensor(int arg)
 
 			printf("nivel de luminosidade: %d\n\n", LUMINOSIDADE);
 			sem_post(&sensor);
+            httpSetVar("www/LUMINOSIDADE.txt", LUMINOSIDADE);
 		}
 
 		usleep(500);
@@ -571,4 +582,84 @@ void readSensor(int arg)
 	}
 
 
+}
+
+void pwm_led(int arg)
+{
+	FILE * persistentConfig;
+    char buffer[10];
+    int num;
+    int input = 0;
+	wiringSetup();
+	softPwmCreate(0, 50, 100);
+	while(1)
+	{
+        sem_wait(&persistentFiles);
+        persistentConfig = fopen("www/ESTADO.txt", "r");
+        if (persistentConfig != NULL) {
+            fread(buffer, 1, 3, persistentConfig);
+            fclose(persistentConfig);
+            sem_post(&persistentFiles);
+            num = atoi(buffer);
+            //printf("%s set as %s\r\n", path, data);
+        } 
+        else {
+            printf("Read txt error.\r\n");
+        }
+        
+        if (num == 0){
+            softPwmWrite(0, 0);
+            printf("Estado stand-by\n\n");
+        }
+        else {
+            printf("Estado ligado\n\n");
+            sem_wait(&persistentFiles);
+            persistentConfig = fopen("www/MODO.txt", "r");
+            if (persistentConfig != NULL) {
+                fread(buffer, 1, 3, persistentConfig);
+                fclose(persistentConfig);
+                sem_post(&persistentFiles);
+                num = atoi(buffer);
+                //printf("%s set as %s\r\n", path, data);
+            } 
+            else {
+                printf("Read txt error.\r\n");
+            }
+            
+            if (num == 1) {
+                printf("Modo manual\n\n");
+                sem_wait(&persistentFiles);
+                persistentConfig = fopen("www/INTENSIDADE.txt", "r");
+                if (persistentConfig != NULL) {
+                    fread(buffer, 1, 3, persistentConfig);
+                    fclose(persistentConfig);
+                    sem_post(&persistentFiles);
+                    input = atoi(buffer);
+                    softPwmWrite(0, input);
+                    //printf("%s set as %s\r\n", path, data);
+                }
+                else {
+                    printf("Read txt error.\r\n");
+                }
+                
+            }
+            else {
+                printf("Modo automatico\n\n");
+                sem_wait(&persistentFiles);
+                persistentConfig = fopen("www/LUMINOSIDADE.txt", "r");
+                if (persistentConfig != NULL) {
+                    fread(buffer, 1, 3, persistentConfig);
+                    fclose(persistentConfig);
+                    sem_post(&persistentFiles);
+                    input = atoi(buffer);
+                    input = 100 - input;
+                    softPwmWrite(0, input);
+                    //printf("%s set as %s\r\n", path, data);
+                }
+                else {
+                    printf("Read txt error.\r\n");
+                }
+            }
+        }
+	}
 }
