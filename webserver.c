@@ -16,7 +16,7 @@
 #include <wiringPi.h>
 #include <math.h>
 #include <stdbool.h>
-#include <softPwmn.h>
+#include <softPwm.h>
 
 #define BUFFERSIZE 1024
 #define LINESIZE    80
@@ -26,8 +26,9 @@
 #define QLEN 10
 #define NUMBER_OF_THREADS 100
 #define min(x,y)   (int)((((int)x)<((int)y))?((int)x):((int)y))
-#define SENSOR 0 	// SENSOR PIN
-#define LUM_MIN 40000
+#define SENSOR_PIN 	0 	// SENSOR PIN
+#define LED_PIN 	1	// LED Pin
+#define NB_SAMPLES_SENSOR 6
 
 void gen_dirlist(char * html_response, char * path);
 void * worker(void * arg);
@@ -258,7 +259,7 @@ int main() {
 
 	// Disparar threads de sensor e LED
 	pthread_create(&sensor1, NULL, (void*) readSensor,1);
-    pthread_create(&led1, NULL, (void*) pwn_led,1);
+    pthread_create(&led1, NULL, (void*) pwm_led,1);
 
 
 	// Conexão
@@ -370,14 +371,14 @@ void * worker(void * arg) {
 		}
 
 		// Verificar HTTP 1.0
-		if (strcmp(ver,"HTTP/1.0")!=0) {
+		/*if (strcmp(ver,"HTTP/1.0")!=0) {
 			strcpy(str, "HTTP/1.0 500 HTTP Version Not Supported\n");
 			printf("%s",str);
 			write (wsd, str, strlen(str));
 			perror("\tErro na versao HTTP, nao é 1.0\r\n");
 			temp++;
 			continue;
-		}
+		}*/
 
     if (strcmp(path, "/www/setMode?mode=0")==0) {
       httpSetVar("www/MODO.txt", 0);
@@ -504,15 +505,15 @@ void readSensor(int arg)
 		//printf("test1\n");
 		count = 0;
 		wiringPiSetup () ;
-		pinMode(SENSOR,OUTPUT);
-		pullUpDnControl(SENSOR,PUD_OFF);
-		digitalWrite(SENSOR,0);
+		pinMode(SENSOR_PIN,OUTPUT);
+		pullUpDnControl(SENSOR_PIN,PUD_OFF);
+		digitalWrite(SENSOR_PIN,0);
 		//printf("test2\n");
 		sleep(1);
 
-		pinMode(SENSOR,INPUT);
+		pinMode(SENSOR_PIN,INPUT);
 
-		while(digitalRead(SENSOR) == 0)
+		while(digitalRead(SENSOR_PIN) == 0)
 		{
 			//printf("%d",count);
 			count++;
@@ -590,8 +591,8 @@ void pwm_led(int arg)
     char buffer[10];
     int num;
     int input = 0;
-	wiringSetup();
-	softPwmCreate(0, 50, 100);
+	wiringPiSetup();
+	softPwmCreate(LED_PIN, 50, 100);
 	while(1)
 	{
         sem_wait(&persistentFiles);
@@ -608,7 +609,7 @@ void pwm_led(int arg)
         }
         
         if (num == 0){
-            softPwmWrite(0, 0);
+            softPwmWrite(LED_PIN, 0);
             printf("Estado stand-by\n\n");
         }
         else {
@@ -635,7 +636,7 @@ void pwm_led(int arg)
                     fclose(persistentConfig);
                     sem_post(&persistentFiles);
                     input = atoi(buffer);
-                    softPwmWrite(0, input);
+                    softPwmWrite(LED_PIN, input);
                     //printf("%s set as %s\r\n", path, data);
                 }
                 else {
@@ -653,7 +654,7 @@ void pwm_led(int arg)
                     sem_post(&persistentFiles);
                     input = atoi(buffer);
                     input = 100 - input;
-                    softPwmWrite(0, input);
+                    softPwmWrite(LED_PIN, input);
                     //printf("%s set as %s\r\n", path, data);
                 }
                 else {
@@ -661,5 +662,6 @@ void pwm_led(int arg)
                 }
             }
         }
+        sleep(1);
 	}
 }

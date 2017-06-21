@@ -1,2 +1,2 @@
-8081
-/home/rlino/Software/dev/projeto
+8080
+./www
