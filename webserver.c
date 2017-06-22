@@ -64,7 +64,7 @@ sem_t		sensor;
 sem_t       persistentFiles;
 pthread_t	threads[100];
 int			thread_count = 0;
-int 		LUMINOSIDADE = 0; 		// Variavel de luminosidade (sensor)
+int 		LUMINOSIDADE = 85; 		// Variavel de luminosidade (sensor)
 
 void append(char *dest,int buffersize, char *src) {
   int d;
@@ -239,7 +239,7 @@ int main() {
     sem_init(&persistentFiles, 0, 1);
 
 	signal(SIGPIPE,SIG_IGN);
-    
+
     httpSetVar("www/ESTADO.txt", 0);
     httpSetVar("www/MODO.txt", 0);
     httpSetVar("www/INTENSIDADE.txt", 0);
@@ -421,6 +421,17 @@ void * worker(void * arg) {
         temp++;
         continue;
       }
+    } else if (startsWith("/www/getLumi", path)==true) {
+      char lumiStr[10], contentLen[100];
+      sprintf(lumiStr, "%d", LUMINOSIDADE);
+      sprintf(contentLen,"Content-Length: %ld\r\n\r\n", strlen(lumiStr));
+      strcpy(str, "HTTP/1.0 200 Success\r\nContent-Type: text/html; charset=UTF-8\r\n");
+      strcat(str, contentLen);
+      strcat(str, lumiStr);
+      printf("%s",str);
+      write (wsd, str, strlen(str));
+      temp++;
+      continue;
     }
 
 		strcpy(filename, BASE);
@@ -524,9 +535,9 @@ void readSensor(int arg)
 
 		countList[k] = count;
 		k++;
-		
-			
-		
+
+
+
 		if (k == NB_SAMPLES_SENSOR)
 		{
 			i = 1;
@@ -538,38 +549,38 @@ void readSensor(int arg)
 			printf("countList[%d] : %d", q, countList[q]);
 		}
 		*/
-		
+
 		printf("lumMin = %d e lumMax = %d\n", lumMin, lumMax);
-		
-			
-		
+
+
+
 		if (i == 1)
 		{
 			mean = 0;
-			
+
 			for (q = 0; q < NB_SAMPLES_SENSOR; q++)
 			{
 				mean = mean + countList[q];
 			}
-				
+
 			mean = mean / NB_SAMPLES_SENSOR;
 
 
 			if (mean < lumMax)
 				lumMax = count;
-				
+
 			if (mean > lumMin)
 				lumMin = count;
-				
+
 			sem_wait(&sensor);
 			if (lumMin-lumMax != 0)
 			{
 				LUMINOSIDADE = (lumMin-count)*100/(lumMin-lumMax);
 			}
-			
+
 			if (LUMINOSIDADE < 0)
 				LUMINOSIDADE = 0;
-			
+
 			else if (LUMINOSIDADE > 100)
 				LUMINOSIDADE = 100;
 
@@ -603,11 +614,11 @@ void pwm_led(int arg)
             sem_post(&persistentFiles);
             num = atoi(buffer);
             //printf("%s set as %s\r\n", path, data);
-        } 
+        }
         else {
             printf("Read txt error.\r\n");
         }
-        
+
         if (num == 0){
             softPwmWrite(LED_PIN, 0);
             printf("Estado stand-by\n\n");
@@ -622,11 +633,11 @@ void pwm_led(int arg)
                 sem_post(&persistentFiles);
                 num = atoi(buffer);
                 //printf("%s set as %s\r\n", path, data);
-            } 
+            }
             else {
                 printf("Read txt error.\r\n");
             }
-            
+
             if (num == 1) {
                 printf("Modo manual\n\n");
                 sem_wait(&persistentFiles);
@@ -642,7 +653,7 @@ void pwm_led(int arg)
                 else {
                     printf("Read txt error.\r\n");
                 }
-                
+
             }
             else {
                 printf("Modo automatico\n\n");

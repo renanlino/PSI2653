@@ -6,6 +6,16 @@
   <script src="bootstrap/js/bootstrap.min.js"></script>
   <link rel="stylesheet" href="bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="bootstrap/css/range.css">
+  <script>
+  (function lumiWorker() {
+  $.get('/www/getLumi', function(data) {
+    // Now that we've completed the request schedule the next one.
+    $('.lumiresult').html(data);
+    console.log(data);
+    setTimeout(lumiWorker, 5000);
+    });
+  })();
+  </script>
 </head>
 <body>
   <nav class="navbar navbar-inverse">
@@ -26,6 +36,13 @@
   </nav>
 
   <div class="container">
+    <div class="panel panel-default">
+      <div class="panel-heading">Luminosidade Atual</div>
+      <div class="panel-body">
+        <p class="lumiresult"></p>
+      </div>
+    </div>
+
     <div class="panel panel-default">
       <div class="panel-heading">Modo</div>
       <div class="panel-body">
